@@ -1,0 +1,21 @@
+# Hot-refreshable registry for the userspace @directive plugin.
+#
+# Put directives under `directives:`. Keys may include or omit the leading @.
+# Each directive can be a string, or a mapping with message/prompt, label,
+# enabled, and aliases. The block is appended only to the model-rendered user
+# message; the stored transcript and TUI-visible message remain unchanged.
+
+directives:
+  work:
+    label: system
+    aliases:
+      - rlm
+    message: |
+      The user has included the @work directive, indicating that they want you to execute the described task by carefully planning and staging RLM sub-agents to execute the work in as-parallel a fashion as possible. Be methodical and careful, and refresh yourself on the RLM Subagents skill if you need to.
+
+  goal:
+    label: system
+    aliases:
+      - plan
+    message: |
+      The user has included the @goal directive. First, determine a concrete work directory for the requested task. Check for an existing .agents/ directory there and create one if it does not exist. If you're in a git repo, add this directory to a .gitignore. Use it as a safe location, and write a detailed plan document in markdown. This document should begin with front-matter that describes, in-detail the desired outcomes or features that the user has communicated. The document should then outline a phased execution plan for achieving the goal. It should have check-boxes and concrete completion criteria for each phase. Unless the user specifically only asked for a plan, begin working through each of the phases- keeping the plan doc up-to-date as you complete criteria. If the harness is in autonomous pacing, then continue working through the plan until the goal is achieved, at which point you can enter a 'parked' state by awaiting interrupts for long intervals like 3600s while you wait for the user to return.
