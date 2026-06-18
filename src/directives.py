@@ -32,7 +32,7 @@ def _default_registry_path() -> Path:
     env_path = os.environ.get("AZO_DIRECTIVES_REGISTRY", "").strip()
     if env_path:
         return Path(env_path).expanduser()
-    # This file normally lives in <plugin-root>/orchestrator/20_directives.py.
+    # This file normally lives in <plugin-root>/src/directives.py.
     return Path(__file__).resolve().parents[1] / "directives.yaml"
 
 

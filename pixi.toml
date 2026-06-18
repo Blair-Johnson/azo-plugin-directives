@@ -9,4 +9,4 @@ pyyaml = "*"
 
 [tool.agent-zoo.plugin]
 name = "azo-plugin-directives"
-orchestrator = ["plugins/orchestrator/20_directives.py"]
+orchestrator = ["src/directives.py"]
