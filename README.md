@@ -5,7 +5,7 @@ Userspace agent-zoo orchestrator plugin that appends directive-specific prompt g
 Install with:
 
 ```bash
-azo-plugin-install /path/to/azo-plugin-directives
+azo-plugin install /path/to/azo-plugin-directives
 ```
 
-Edit `directives.yaml` to customize directive behavior, or set `AZO_DIRECTIVES_REGISTRY` to point at another registry file.
+Install initializes `~/.local/share/agent-zoo/orchestrated/plugin-configs/azo-plugin-directives/directives.yaml` from the default `directives.yaml` if it is missing. Edit that installed config, or set `AZO_DIRECTIVES_REGISTRY` to point at another registry file. Normal uninstall keeps the config; use `azo-plugin uninstall azo-plugin-directives --purge-config` for full removal.

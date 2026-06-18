@@ -10,3 +10,6 @@ pyyaml = "*"
 [tool.agent-zoo.plugin]
 name = "azo-plugin-directives"
 orchestrator = ["src/directives.py"]
+
+[tool.agent-zoo.plugin.config]
+files = ["directives.yaml"]

@@ -21,6 +21,7 @@ from agent_utils.components import CompressToolResults, ExcludeForgotten, Messag
 
 log = logging.getLogger("agent_zoo_user_plugin.directives")
 
+_PLUGIN_NAME = "azo-plugin-directives"
 _DIRECTIVE_RE = re.compile(r"^@([A-Za-z][A-Za-z0-9_-]*)(?:\b|$)")
 _MARKER_ATTR = "_directive_prompt_wrapper"
 _PREVIOUS_RENDER_ATTR = "_directive_prompt_previous_render"
@@ -28,11 +29,25 @@ _WRAPPER_RENDER_ATTR = "_directive_prompt_render_fn"
 _CONFIG_ATTR = "_directive_prompt_config"
 
 
+
+def _agent_zoo_data_root() -> Path:
+    install_root = os.environ.get("AGENT_ZOO_INSTALL_ROOT", "").strip()
+    if install_root:
+        return Path(install_root).expanduser()
+    xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
+    base = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local" / "share"
+    return base / "agent-zoo"
+
+
+def _user_config_dir() -> Path:
+    return _agent_zoo_data_root() / "orchestrated" / "plugin-configs" / _PLUGIN_NAME
 def _default_registry_path() -> Path:
     env_path = os.environ.get("AZO_DIRECTIVES_REGISTRY", "").strip()
     if env_path:
         return Path(env_path).expanduser()
-    # This file normally lives in <plugin-root>/src/directives.py.
+    user_config = _user_config_dir() / "directives.yaml"
+    if user_config.exists():
+        return user_config
     return Path(__file__).resolve().parents[1] / "directives.yaml"
 
 
