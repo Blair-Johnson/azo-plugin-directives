@@ -1,7 +1,7 @@
 """Userspace @directive prompt expansion for the orchestrator pipeline.
 
-A user message that begins with a registered directive such as ``@work`` is
-rendered to the model with an extra user-role system-labeled block appended.
+A user message that contains registered directives such as ``@work`` is
+rendered to the model with extra user-role system-labeled blocks appended.
 The stored entry content is not changed, so the appended block stays out of the
 TUI transcript projection.
 """
@@ -22,7 +22,7 @@ from agent_utils.components import CompressToolResults, ExcludeForgotten, Messag
 log = logging.getLogger("agent_zoo_user_plugin.directives")
 
 _PLUGIN_NAME = "azo-plugin-directives"
-_DIRECTIVE_RE = re.compile(r"^@([A-Za-z][A-Za-z0-9_-]*)(?:\b|$)")
+_DIRECTIVE_RE = re.compile(r"(?<![\w@])@([A-Za-z][A-Za-z0-9_-]*)(?:\b|$)")
 _MARKER_ATTR = "_directive_prompt_wrapper"
 _PREVIOUS_RENDER_ATTR = "_directive_prompt_previous_render"
 _WRAPPER_RENDER_ATTR = "_directive_prompt_render_fn"
@@ -140,28 +140,28 @@ class DirectivePromptRenderer:
             return
 
         content = self._entry_content(entry)
-        directive_name = self._extract_directive(content)
-        directive = self.registry.get(directive_name) if directive_name else None
-        if not directive:
+        configs = self._find_directives(content)
+        if not configs:
             self._unwrap_if_current(entry)
             return
 
-        config = (directive_name, directive["label"], directive["message"])
-        if getattr(entry, _MARKER_ATTR, False) and getattr(entry, _CONFIG_ATTR, None) == config:
+        if getattr(entry, _MARKER_ATTR, False) and getattr(entry, _CONFIG_ATTR, None) == configs:
             return
 
         self._unwrap_if_current(entry)
         previous_render = getattr(entry, "render_fn", None)
 
-        def render(state, _previous=previous_render, _entry=entry, _config=config):
+        def render(state, _previous=previous_render, _entry=entry, _configs=configs):
             if _previous is None:
                 messages = _entry.render_default(state)
             else:
                 messages = _previous(state)
             if not messages:
                 return messages
-            name, label, message = _config
-            block = f"\n\n=== [{label}] ===\nThe user has included the @{name} directive.\n\n{message}"
+            blocks = []
+            for name, label, message in _configs:
+                blocks.append(f"=== [{label}] ===\nThe user has included the @{name} directive.\n\n{message}")
+            block = "\n\n" + "\n\n".join(blocks)
             rendered = []
             appended = False
             for msg in messages:
@@ -176,7 +176,7 @@ class DirectivePromptRenderer:
         setattr(entry, _MARKER_ATTR, True)
         setattr(entry, _PREVIOUS_RENDER_ATTR, previous_render)
         setattr(entry, _WRAPPER_RENDER_ATTR, render)
-        setattr(entry, _CONFIG_ATTR, config)
+        setattr(entry, _CONFIG_ATTR, configs)
 
     @staticmethod
     def _entry_content(entry) -> str:
@@ -185,20 +185,34 @@ class DirectivePromptRenderer:
             return ""
         return str(messages[0].get("content") or "")
 
+    def _find_directives(self, content: str) -> tuple[tuple[str, str, str], ...]:
+        configs: list[tuple[str, str, str]] = []
+        seen_prompts: set[tuple[str, str]] = set()
+        for match in _DIRECTIVE_RE.finditer(self._user_message_body(content)):
+            name = match.group(1).lower()
+            directive = self.registry.get(name)
+            if not directive:
+                continue
+            prompt_key = (directive["label"], directive["message"])
+            if prompt_key in seen_prompts:
+                continue
+            configs.append((name, *prompt_key))
+            seen_prompts.add(prompt_key)
+        return tuple(configs)
+
     @staticmethod
-    def _extract_directive(content: str) -> str | None:
+    def _user_message_body(content: str) -> str:
         lines = content.splitlines()
         index = 0
         while index < len(lines) and not lines[index].strip():
             index += 1
         if index < len(lines) and lines[index].strip() == "--- USER ---":
             index += 1
-            while index < len(lines) and not lines[index].strip():
-                index += 1
-        if index >= len(lines):
-            return None
-        match = _DIRECTIVE_RE.match(lines[index].strip())
-        return match.group(1).lower() if match else None
+            end = index
+            while end < len(lines) and lines[end].strip() != "--- END USER ---":
+                end += 1
+            return "\n".join(lines[index:end])
+        return content
 
     @staticmethod
     def _unwrap_if_current(entry) -> None:

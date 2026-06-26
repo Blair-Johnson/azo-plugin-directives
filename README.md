@@ -1,6 +1,6 @@
 # azo-plugin-directives
 
-Userspace agent-zoo orchestrator plugin that appends directive-specific prompt guidance for user messages beginning with directives such as `@work` or `@goal`.
+Userspace agent-zoo orchestrator plugin that appends directive-specific prompt guidance for user messages containing one or more directives such as `@work` or `@goal`.
 
 Install with:
 

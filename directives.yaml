@@ -2,8 +2,8 @@
 #
 # Put directives under `directives:`. Keys may include or omit the leading @.
 # Each directive can be a string, or a mapping with message/prompt, label,
-# enabled, and aliases. The block is appended only to the model-rendered user
-# message; the stored transcript and TUI-visible message remain unchanged.
+# enabled, and aliases. Matching blocks are appended only to the model-rendered
+# user message; the stored transcript and TUI-visible message remain unchanged.
 
 directives:
   work:
