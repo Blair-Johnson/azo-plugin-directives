@@ -10,8 +10,9 @@ directives:
     label: system
     aliases:
       - rlm
+      - delegate
     message: |
-      The user has included the @work directive, indicating that they want you to execute the described task by carefully planning and staging RLM sub-agents to execute the work in as-parallel a fashion as possible. Be methodical and careful, and refresh yourself on the RLM Subagents skill if you need to.
+      The user has included the @work directive, indicating that they want you to execute the described task by carefully planning and staging RLM sub-agents to execute the work in as-parallel a fashion as possible. Be methodical and careful, and refresh yourself on the RLM Subagents skill if you need to. Be patient, and wait for RLMs to complete. You will be woken from await if they error out, so practice exponential backoff in your await_interrupts calls if you are blocked and waiting on an RLM. Do not get impatient and cancel them.
 
   goal:
     label: system
@@ -19,3 +20,32 @@ directives:
       - plan
     message: |
       The user has included the @goal directive. First, determine a concrete work directory for the requested task. Check for an existing .agents/ directory there and create one if it does not exist. If you're in a git repo, add this directory to a .gitignore. Use it as a safe location, and write a detailed plan document in markdown. This document should begin with front-matter that describes, in-detail the desired outcomes or features that the user has communicated. The document should then outline a phased execution plan for achieving the goal. It should have check-boxes and concrete completion criteria for each phase. Unless the user specifically only asked for a plan, begin working through each of the phases- keeping the plan doc up-to-date as you complete criteria. If the harness is in autonomous pacing, then continue working through the plan until the goal is achieved, at which point you can enter a 'parked' state by awaiting interrupts for long intervals like 3600s while you wait for the user to return.
+
+  design:
+    label: system
+    aliases:
+      - workshop
+    message: |
+      The user has included the @design directive, indicating that they want to have a digestable and interactive design discussion with you. The most significant requirement of this directive is short and digestible single-paragraph responses to the user (literally no more than 4-5 sentences to describe your idea). You may provide some extra framing narrative around the idea but stick to this limit. Begin with the most important design requirements; identify a single requirement at a time and propose an idea that you think best meets the user's requirements and goals. Listen to the user's feedback and continue to iterate with them. Do not run-ahead and propose long-winded ideas, keep the user in the loop. 
+
+  worktree:
+    label: system
+    aliases:
+      - worktrees
+    message: |
+      The user has included the @worktree directive, indicating that they want you to create a fresh worktree to make your changes in. Look for <repo-name>/../<repo-name>-worktrees/, and create it if such a directory does not exist. Within the worktrees directory, create a fresh worktree with a short and descriptive name. Do your work from within that worktree. If the user indicates that they want you to use an existing branch, then you can check it out in a worktree at this location if not already present.
+
+  review:
+    label: system
+    aliases:
+      - code-review
+    message: |
+      The user has included the @review directive, indicating that they want you to have an RLM produce a code-review against your changes. Give the RLM all the project context that it will need to understand the intended changes and intended behavior, so that it can understand your diffs and look for potential bugs or faulty application logic. Continue resubmitting for review until the reviews come back clean. Use your best judgement, if issues seem like they require design intent input from the user, then make a note of them to bring up with the user at the end and proceed with fixing the other issues raised in review.
+
+  queue:
+    label: system
+    aliases:
+      - defer
+    message: |
+      The user has included the @queue directive, indicating that they want you to continue your current work but note their comments or tasking in your checklist to return to when you're finished with your current task. Do not immediately acknowledge the user's new request, just batch your checklist item creation in with whatever other tool calls you're making. 
+
