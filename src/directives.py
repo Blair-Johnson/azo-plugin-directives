@@ -16,17 +16,43 @@ from typing import Any
 
 import yaml
 
-from agent_utils import Feature
-from agent_utils.components import CompressToolResults, ExcludeForgotten, MessageRenderer
+_PLUGIN_NAME = "azo-plugin-directives"
+_AGENT_UTILS_MIN_VERSION = "0.3.0"
+
+
+class _PluginCompatibilityError(RuntimeError):
+    agent_zoo_plugin_compatibility = True
+
+
+try:
+    from agent_utils import Feature, RENDER_CHANNEL_API_VERSION
+    from agent_utils.components import (
+        CompressToolResults,
+        ExcludeForgotten,
+        MessageRenderer,
+        RenderTransformRegistrar,
+    )
+    from agent_utils.types import Entry, MODEL_RENDER_CHANNEL
+except (ImportError, AttributeError) as exc:
+    raise _PluginCompatibilityError(
+        f"{_PLUGIN_NAME} requires agent-utils>={_AGENT_UTILS_MIN_VERSION} with "
+        "RenderTransformRegistrar, MODEL_RENDER_CHANNEL, and "
+        "Entry.register_render_transform; upgrade agent-utils before reloading."
+    ) from exc
+
+if (
+    RENDER_CHANNEL_API_VERSION != _AGENT_UTILS_MIN_VERSION
+    or MODEL_RENDER_CHANNEL != "model"
+    or not hasattr(Entry, "register_render_transform")
+):
+    raise _PluginCompatibilityError(
+        f"{_PLUGIN_NAME} requires agent-utils>={_AGENT_UTILS_MIN_VERSION} with "
+        "RenderTransformRegistrar, MODEL_RENDER_CHANNEL, and "
+        "Entry.register_render_transform; upgrade agent-utils before reloading."
+    )
 
 log = logging.getLogger("agent_zoo_user_plugin.directives")
-
-_PLUGIN_NAME = "azo-plugin-directives"
 _DIRECTIVE_RE = re.compile(r"(?<![\w@])@([A-Za-z][A-Za-z0-9_-]*)(?:\b|$)")
-_MARKER_ATTR = "_directive_prompt_wrapper"
-_PREVIOUS_RENDER_ATTR = "_directive_prompt_previous_render"
-_WRAPPER_RENDER_ATTR = "_directive_prompt_render_fn"
-_CONFIG_ATTR = "_directive_prompt_config"
 
 
 
@@ -118,8 +144,8 @@ class DirectiveRegistry:
         return normalized
 
 
-class DirectivePromptRenderer:
-    """Append registered directive text to model rendering only."""
+class DirectivePromptRenderer(RenderTransformRegistrar):
+    """Register directive prompt expansion for the model channel."""
 
     reads = {"entries"}
     writes = {"entries"}
@@ -128,54 +154,58 @@ class DirectivePromptRenderer:
         self.registry = registry or DirectiveRegistry()
 
     def __call__(self, state):
+        """Refresh configuration and append fresh entry-local transforms."""
         self.registry.refresh()
         for entry in getattr(state, "entries", []) or []:
-            self._refresh_entry(entry)
+            if (
+                getattr(entry, "role", "") != "user"
+                or getattr(entry, "system_generated", False)
+            ):
+                continue
+
+            configs = self._find_directives(self._entry_content(entry))
+            if not configs:
+                continue
+
+            entry.register_render_transform(
+                MODEL_RENDER_CHANNEL,
+                self._make_transform(configs),
+                name="directive prompts",
+            )
         return state
 
-    def _refresh_entry(self, entry) -> None:
-        if getattr(entry, "role", "") != "user" or getattr(entry, "system_generated", False):
-            self._unwrap_if_current(entry)
-            return
+    @staticmethod
+    def _make_transform(configs):
+        """Create a pure copy-on-write transform for one entry's directives."""
+        blocks = [
+            f"=== [{label}] ===\n"
+            f"The user has included the @{name} directive.\n\n{message}"
+            for name, label, message in configs
+        ]
+        block = "\n\n" + "\n\n".join(blocks)
 
-        content = self._entry_content(entry)
-        configs = self._find_directives(content)
-        if not configs:
-            self._unwrap_if_current(entry)
-            return
-
-        if getattr(entry, _MARKER_ATTR, False) and getattr(entry, _CONFIG_ATTR, None) == configs:
-            return
-
-        self._unwrap_if_current(entry)
-        previous_render = getattr(entry, "render_fn", None)
-
-        def render(state, _previous=previous_render, _entry=entry, _configs=configs):
-            if _previous is None:
-                messages = _entry.render_default(state)
-            else:
-                messages = _previous(state)
+        def transform(messages, _state):
             if not messages:
                 return messages
-            blocks = []
-            for name, label, message in _configs:
-                blocks.append(f"=== [{label}] ===\nThe user has included the @{name} directive.\n\n{message}")
-            block = "\n\n" + "\n\n".join(blocks)
+
             rendered = []
             appended = False
-            for msg in messages:
-                if not appended and isinstance(msg, dict) and msg.get("role") == "user":
-                    rendered.append({**msg, "content": str(msg.get("content") or "") + block})
+            for message in messages:
+                if (
+                    not appended
+                    and isinstance(message, dict)
+                    and message.get("role") == "user"
+                ):
+                    rendered.append({
+                        **message,
+                        "content": str(message.get("content") or "") + block,
+                    })
                     appended = True
                 else:
-                    rendered.append(msg)
+                    rendered.append(message)
             return rendered
 
-        entry.render_fn = render
-        setattr(entry, _MARKER_ATTR, True)
-        setattr(entry, _PREVIOUS_RENDER_ATTR, previous_render)
-        setattr(entry, _WRAPPER_RENDER_ATTR, render)
-        setattr(entry, _CONFIG_ATTR, configs)
+        return transform
 
     @staticmethod
     def _entry_content(entry) -> str:
@@ -212,18 +242,6 @@ class DirectivePromptRenderer:
                 end += 1
             return "\n".join(lines[index:end])
         return content
-
-    @staticmethod
-    def _unwrap_if_current(entry) -> None:
-        if not getattr(entry, _MARKER_ATTR, False):
-            return
-        previous = getattr(entry, _PREVIOUS_RENDER_ATTR, None)
-        wrapper = getattr(entry, _WRAPPER_RENDER_ATTR, None)
-        if getattr(entry, "render_fn", None) is wrapper:
-            entry.render_fn = previous
-        for attr in (_MARKER_ATTR, _PREVIOUS_RENDER_ATTR, _WRAPPER_RENDER_ATTR, _CONFIG_ATTR):
-            if hasattr(entry, attr):
-                delattr(entry, attr)
 
 
 def register_features(builder, *, session, config):
