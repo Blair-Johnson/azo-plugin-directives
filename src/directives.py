@@ -17,43 +17,48 @@ from typing import Any
 import yaml
 
 _PLUGIN_NAME = "azo-plugin-directives"
-_AGENT_UTILS_MIN_VERSION = "0.3.0"
+_AGENT_UTILS_MIN_VERSION = "0.4.0"
 
 
 class _PluginCompatibilityError(RuntimeError):
     agent_zoo_plugin_compatibility = True
 
 
+def _version_tuple(raw: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in str(raw).split(".") if part.isdigit())
+
+
 try:
-    from agent_utils import Feature, RENDER_CHANNEL_API_VERSION
-    from agent_utils.components import (
+    from agent_utils import RENDER_CHANNEL_API_VERSION
+    from agent_utils.core.events import Event, RenderRequested
+    from agent_utils.core.pipeline import EmitFn, Feature
+    from agent_utils.core.state import Entry, MODEL_RENDER_CHANNEL, State
+    from agent_utils.features.core import (
         CompressToolResults,
         ExcludeForgotten,
         MessageRenderer,
         RenderTransformRegistrar,
     )
-    from agent_utils.types import Entry, MODEL_RENDER_CHANNEL
 except (ImportError, AttributeError) as exc:
     raise _PluginCompatibilityError(
         f"{_PLUGIN_NAME} requires agent-utils>={_AGENT_UTILS_MIN_VERSION} with "
         "RenderTransformRegistrar, MODEL_RENDER_CHANNEL, and "
-        "Entry.register_render_transform; upgrade agent-utils before reloading."
+        "Entry.append_render_transform; upgrade agent-utils before reloading."
     ) from exc
 
 if (
-    RENDER_CHANNEL_API_VERSION != _AGENT_UTILS_MIN_VERSION
+    _version_tuple(RENDER_CHANNEL_API_VERSION) < _version_tuple(_AGENT_UTILS_MIN_VERSION)
     or MODEL_RENDER_CHANNEL != "model"
-    or not hasattr(Entry, "register_render_transform")
+    or not hasattr(Entry, "append_render_transform")
 ):
     raise _PluginCompatibilityError(
         f"{_PLUGIN_NAME} requires agent-utils>={_AGENT_UTILS_MIN_VERSION} with "
         "RenderTransformRegistrar, MODEL_RENDER_CHANNEL, and "
-        "Entry.register_render_transform; upgrade agent-utils before reloading."
+        "Entry.append_render_transform; upgrade agent-utils before reloading."
     )
 
 log = logging.getLogger("agent_zoo_user_plugin.directives")
 _DIRECTIVE_RE = re.compile(r"(?<![\w@])@([A-Za-z][A-Za-z0-9_-]*)(?:\b|$)")
-
 
 
 def _agent_zoo_data_root() -> Path:
@@ -66,6 +71,8 @@ def _agent_zoo_data_root() -> Path:
 
 def _user_config_dir() -> Path:
     return _agent_zoo_data_root() / "plugin-configs" / _PLUGIN_NAME
+
+
 def _default_registry_path() -> Path:
     env_path = os.environ.get("AZO_DIRECTIVES_REGISTRY", "").strip()
     if env_path:
@@ -79,7 +86,7 @@ def _default_registry_path() -> Path:
 class DirectiveRegistry:
     """Hot-refreshing YAML registry for directive prompt blocks."""
 
-    def __init__(self, path: Path | None = None):
+    def __init__(self, path: Path | None = None) -> None:
         self.path = path or _default_registry_path()
         self._mtime_ns: int | None = None
         self._directives: dict[str, dict[str, Any]] = {}
@@ -150,11 +157,15 @@ class DirectivePromptRenderer(RenderTransformRegistrar):
     reads = {"entries"}
     writes = {"entries"}
 
-    def __init__(self, registry: DirectiveRegistry | None = None):
+    def __init__(self, registry: DirectiveRegistry | None = None) -> None:
         self.registry = registry or DirectiveRegistry()
 
-    def __call__(self, state):
+    def handle(self, event: Event, state: State, emit: EmitFn) -> None:
         """Refresh configuration and append fresh entry-local transforms."""
+        del emit
+        assert isinstance(event, RenderRequested)
+        if event.channels is not None and MODEL_RENDER_CHANNEL not in event.channels:
+            return
         self.registry.refresh()
         for entry in getattr(state, "entries", []) or []:
             if (
@@ -167,15 +178,14 @@ class DirectivePromptRenderer(RenderTransformRegistrar):
             if not configs:
                 continue
 
-            entry.register_render_transform(
+            entry.append_render_transform(
                 MODEL_RENDER_CHANNEL,
                 self._make_transform(configs),
                 name="directive prompts",
             )
-        return state
 
     @staticmethod
-    def _make_transform(configs):
+    def _make_transform(configs: tuple[tuple[str, str, str], ...]):
         """Create a pure copy-on-write transform for one entry's directives."""
         blocks = [
             f"=== [{label}] ===\n"
@@ -184,7 +194,10 @@ class DirectivePromptRenderer(RenderTransformRegistrar):
         ]
         block = "\n\n" + "\n\n".join(blocks)
 
-        def transform(messages, _state):
+        def transform(
+            messages: list[dict[str, Any]],
+            _state: State,
+        ) -> list[dict[str, Any]]:
             if not messages:
                 return messages
 
@@ -196,10 +209,12 @@ class DirectivePromptRenderer(RenderTransformRegistrar):
                     and isinstance(message, dict)
                     and message.get("role") == "user"
                 ):
-                    rendered.append({
-                        **message,
-                        "content": str(message.get("content") or "") + block,
-                    })
+                    rendered.append(
+                        {
+                            **message,
+                            "content": str(message.get("content") or "") + block,
+                        }
+                    )
                     appended = True
                 else:
                     rendered.append(message)
@@ -208,7 +223,7 @@ class DirectivePromptRenderer(RenderTransformRegistrar):
         return transform
 
     @staticmethod
-    def _entry_content(entry) -> str:
+    def _entry_content(entry: Any) -> str:
         messages = getattr(entry, "messages", None) or []
         if not messages or not isinstance(messages[0], dict):
             return ""
@@ -244,9 +259,17 @@ class DirectivePromptRenderer(RenderTransformRegistrar):
         return content
 
 
-def register_features(builder, *, session, config):
-    builder.add(Feature(
-        name="directive_prompts",
-        components=[DirectivePromptRenderer()],
-        order=[CompressToolResults, DirectivePromptRenderer, ExcludeForgotten, MessageRenderer],
-    ))
+def register_features(builder: Any, *, session: Any, config: Any) -> None:
+    del session, config
+    builder.add(
+        Feature(
+            name="directive_prompts",
+            components=[DirectivePromptRenderer()],
+            order=[
+                CompressToolResults,
+                DirectivePromptRenderer,
+                ExcludeForgotten,
+                MessageRenderer,
+            ],
+        )
+    )
