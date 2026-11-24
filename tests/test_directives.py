@@ -149,9 +149,12 @@ def test_registrar_is_public_model_transform_and_pipeline_builds_in_order():
         component for component in pipeline if isinstance(component, DirectivePromptRenderer)
     )
     assert isinstance(registrar, RenderTransformRegistrar)
+    renderer_idx = next(
+        idx for idx, component in enumerate(pipeline) if isinstance(component, MessageRenderer)
+    )
     assert types.index(CompressToolResults) < types.index(DirectivePromptRenderer)
     assert types.index(DirectivePromptRenderer) < types.index(ExcludeForgotten)
-    assert types.index(ExcludeForgotten) < types.index(MessageRenderer)
+    assert types.index(ExcludeForgotten) < renderer_idx
     assert registrar.reads == {"entries"}
     assert MODEL_RENDER_CHANNEL == "model"
 
