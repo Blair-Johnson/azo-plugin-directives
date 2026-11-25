@@ -7,8 +7,6 @@ from agent_utils.core.pipeline import PipelineBuilder
 from agent_utils.core.session import Session
 from agent_utils.core.state import Entry, MODEL_RENDER_CHANNEL, State
 from agent_utils.features.core import (
-    CompressToolResults,
-    ExcludeForgotten,
     MessageRenderer,
     RenderPlanFinalizer,
     RenderPlanInitializer,
@@ -153,9 +151,9 @@ def test_registrar_is_public_model_transform_and_pipeline_builds_in_order():
     renderer_idx = next(
         idx for idx, component in enumerate(pipeline) if isinstance(component, MessageRenderer)
     )
-    assert types.index(CompressToolResults) < types.index(DirectivePromptRenderer)
-    assert types.index(DirectivePromptRenderer) < types.index(ExcludeForgotten)
-    assert types.index(ExcludeForgotten) < renderer_idx
+    assert types.index(RenderPlanInitializer) < types.index(DirectivePromptRenderer)
+    assert types.index(DirectivePromptRenderer) < types.index(RenderPlanFinalizer)
+    assert types.index(RenderPlanFinalizer) < renderer_idx
     assert registrar.reads == {"entries"}
     assert MODEL_RENDER_CHANNEL == "model"
 
