@@ -97,6 +97,7 @@ class _DirectivesRuntime:
     stat_op: OpId | None = None
     read_op: OpId | None = None
     pending_mtime_ns: int | None = None
+    hydrating_readiness: bool = False
     initialized: bool = False
 
 
@@ -210,13 +211,23 @@ class DirectiveRefreshHandler:
             rt.initialized = True
         return rt
 
-    def _submit_stat(self, state: State, rt: _DirectivesRuntime) -> None:
+    def _submit_stat(
+        self,
+        state: State,
+        rt: _DirectivesRuntime,
+        *,
+        hold_readiness: str | bool | None = None,
+    ) -> None:
         if rt.stat_op is not None or rt.read_op is not None:
             return
         io_table = getattr(state, "io", None)
         if io_table is None:
             return
-        rt.stat_op = io_table.submit(FsStat(str(self.registry.path)), tag=_IO_TAG)
+        rt.stat_op = io_table.submit(
+            FsStat(str(self.registry.path)),
+            tag=_IO_TAG,
+            hold_readiness=hold_readiness,
+        )
 
     def handle(self, event: Event, state: State, emit: EmitFn) -> None:
         rt = self._runtime(state)
@@ -224,12 +235,18 @@ class DirectiveRefreshHandler:
             if isinstance(event, SessionRestored):
                 rt.stat_op = None
                 rt.read_op = None
+                rt.hydrating_readiness = True
+                self._submit_stat(state, rt, hold_readiness="directives")
+                if rt.stat_op is None:
+                    rt.hydrating_readiness = False
+                return
             self._submit_stat(state, rt)
             return
 
         if isinstance(event, IoCompleted) and event.tag == _IO_TAG:
             if event.op_id == rt.stat_op:
                 rt.stat_op = None
+                hold_readiness = "directives" if rt.hydrating_readiness else None
                 info = event.value
                 exists = (
                     info.get("exists", True)
@@ -239,6 +256,7 @@ class DirectiveRefreshHandler:
                 if not exists:
                     rt.directives = {}
                     rt.mtime_ns = None
+                    rt.hydrating_readiness = False
                     return
                 mtime_ns = (
                     info.get("mtime_ns")
@@ -246,13 +264,19 @@ class DirectiveRefreshHandler:
                     else getattr(info, "mtime_ns", None)
                 )
                 if mtime_ns is not None and mtime_ns == rt.mtime_ns:
+                    rt.hydrating_readiness = False
                     return
                 rt.pending_mtime_ns = mtime_ns
-                rt.read_op = state.io.submit(FsRead(str(self.registry.path)), tag=_IO_TAG)
+                rt.read_op = state.io.submit(
+                    FsRead(str(self.registry.path)),
+                    tag=_IO_TAG,
+                    hold_readiness=hold_readiness,
+                )
                 return
 
             if event.op_id == rt.read_op:
                 rt.read_op = None
+                rt.hydrating_readiness = False
                 text = (
                     event.value.decode("utf-8")
                     if isinstance(event.value, bytes)
@@ -270,11 +294,13 @@ class DirectiveRefreshHandler:
         if isinstance(event, IoFailed) and event.tag == _IO_TAG:
             if event.op_id == rt.stat_op:
                 rt.stat_op = None
+                rt.hydrating_readiness = False
                 if isinstance(event.error, FileNotFoundError):
                     rt.directives = {}
                     rt.mtime_ns = None
             elif event.op_id == rt.read_op:
                 rt.read_op = None
+                rt.hydrating_readiness = False
 
 
 class DirectivePromptRenderer(RenderTransformRegistrar):

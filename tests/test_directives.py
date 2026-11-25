@@ -190,3 +190,42 @@ def test_composes_onto_default_builder():
     pipeline = builder.build()
     assert any(isinstance(comp, DirectivePromptRenderer) for comp in pipeline)
     assert_pipeline_sans_io(pipeline)
+
+
+def test_session_restored_holds_readiness_until_hydration_completes(tmp_path, monkeypatch):
+    from agent_utils.core.events import BeforeLLM, IoCompleted, SessionRestored
+    from agent_utils.core.io import FsRead, FsStat, SubmitOp
+
+    registry_path = tmp_path / "directives.yaml"
+    write_registry(registry_path, "directives:\n  work:\n    message: v1\n")
+    monkeypatch.setenv("AZO_DIRECTIVES_REGISTRY", str(registry_path))
+
+    session = Session()
+    builder = PipelineBuilder().add(core_feature())
+    register_features(builder, session=session, config={})
+    session.pipeline = builder.build(suppress_warnings=True)
+    session.ensure_initialized()
+
+    # BeforeLLM refresh must not hold readiness.
+    before_effects = session.step(BeforeLLM())
+    stat_eff = next(e for e in before_effects if isinstance(e, SubmitOp) and isinstance(e.request, FsStat))
+    assert session.state.readiness.is_ready
+    session.step(IoCompleted(op_id=stat_eff.op_id, value={"exists": True, "mtime_ns": registry_path.stat().st_mtime_ns}))
+    assert session.state.readiness.is_ready
+
+    # SessionRestored hydration must hold readiness across FsStat -> FsRead until complete.
+    restore_effects = session.step(SessionRestored(reason="resume"))
+    stat_eff2 = next(e for e in restore_effects if isinstance(e, SubmitOp) and isinstance(e.request, FsStat))
+    assert not session.state.readiness.is_ready
+    assert any(k.startswith("directives:") for k in session.state.readiness.holds)
+
+    # Stat reports newer mtime -> submits FsRead while keeping readiness held seamlessly.
+    new_mtime = registry_path.stat().st_mtime_ns + 10
+    read_effects = session.step(IoCompleted(op_id=stat_eff2.op_id, value={"exists": True, "mtime_ns": new_mtime}))
+    read_eff = next(e for e in read_effects if isinstance(e, SubmitOp) and isinstance(e.request, FsRead))
+    assert not session.state.readiness.is_ready
+    assert any(k.startswith("directives:") for k in session.state.readiness.holds)
+
+    # Completing FsRead releases readiness.
+    session.step(IoCompleted(op_id=read_eff.op_id, value="directives:\n  work:\n    message: v2\n"))
+    assert session.state.readiness.is_ready
