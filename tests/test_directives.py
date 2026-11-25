@@ -116,6 +116,7 @@ def test_parse_error_keeps_last_good_configuration(tmp_path):
     assert "last good guidance" in render(state)[0]["content"]
 
     write_registry(registry_path, "directives: [invalid", bump=True)
+    registry.refresh()
     prepare(state, registry)
     rendered = render(state)
     assert "last good guidance" in rendered[0]["content"]
@@ -176,6 +177,8 @@ def test_user_wrapper_payload_parsing_is_preserved(tmp_path):
 
 
 def test_composes_onto_default_builder():
+    from agent_zoo.testing import assert_pipeline_sans_io
+
     session = Session()
     builder = build_default_builder(
         session,
@@ -186,3 +189,4 @@ def test_composes_onto_default_builder():
     register_features(builder, session=session, config={})
     pipeline = builder.build()
     assert any(isinstance(comp, DirectivePromptRenderer) for comp in pipeline)
+    assert_pipeline_sans_io(pipeline)

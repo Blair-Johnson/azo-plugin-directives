@@ -8,7 +8,7 @@ python = ">=3.11"
 pyyaml = "*"
 
 [pypi-dependencies]
-agent-utils = ">=0.3.0"
+agent-utils = ">=0.4.0"
 
 [tool.agent-zoo.plugin]
 name = "azo-plugin-directives"
