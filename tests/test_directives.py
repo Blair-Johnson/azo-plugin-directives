@@ -142,7 +142,7 @@ def test_directives_render_only_on_explicit_model_channel_and_isolate_storage(tm
 def test_registrar_is_public_model_transform_and_pipeline_builds_in_order():
     session = Session()
     builder = PipelineBuilder().add(core_feature())
-    register_features(builder, session=session, config={})
+    register_features(builder, config={})
     pipeline = builder.build(suppress_warnings=True)
     types = [type(component) for component in pipeline]
 
@@ -186,7 +186,7 @@ def test_composes_onto_default_builder():
         include_plugins=False,
         include_llm_drivers=False,
     )
-    register_features(builder, session=session, config={})
+    register_features(builder, config={})
     pipeline = builder.build()
     assert any(isinstance(comp, DirectivePromptRenderer) for comp in pipeline)
     assert_pipeline_sans_io(pipeline)
@@ -202,7 +202,7 @@ def test_session_restored_holds_readiness_until_hydration_completes(tmp_path, mo
 
     session = Session()
     builder = PipelineBuilder().add(core_feature())
-    register_features(builder, session=session, config={})
+    register_features(builder, config={})
     session.pipeline = builder.build(suppress_warnings=True)
     session.ensure_initialized()
 

@@ -424,8 +424,8 @@ class DirectivePromptRenderer(RenderTransformRegistrar):
         return content
 
 
-def register_features(builder: Any, *, session: Any, config: Any) -> None:
-    del session, config
+def register_features(builder: Any, *, config: Any) -> None:
+    del config
     registry = DirectiveRegistry()
     builder.add(
         Feature(
